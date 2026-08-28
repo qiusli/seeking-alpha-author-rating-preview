@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Seeking Alpha Author Rating Preview",
+  "version": "1.0.10",
+  "description": "Hover an author on a Seeking Alpha article to preview recent rating histories.",
+  "host_permissions": ["https://query1.finance.yahoo.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [{
+    "matches": ["https://seekingalpha.com/article/*"],
+    "js": ["content.js"],
+    "css": ["styles.css"],
+    "run_at": "document_start"
+  }]
+}
