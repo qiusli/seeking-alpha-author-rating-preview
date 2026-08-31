@@ -169,7 +169,7 @@
       tr.className = (key ? 'is-key ' : '') + 'is-indented';
       const trend = dates.map(date => {
         const raw = Number(cells.get(date)?.raw_value);
-        const height = !Number.isFinite(raw) ? 0 : (mixedSigns || negativeOnly) ? Math.max(2, Math.abs(raw) / (raw < 0 ? negativeMaximum : positiveMaximum) * 50) : Math.max(3, Math.abs(raw) / maximum * 100);
+        const height = !Number.isFinite(raw) ? 0 : mixedSigns ? Math.abs(raw) / maximum * 50 : negativeOnly ? Math.abs(raw) / negativeMaximum * 50 : Math.abs(raw) / maximum * 100;
         return '<i class="saah-financial-trend-slot"><b class="' + (raw < 0 ? 'is-negative' : 'is-positive') + '" style="--bar-height:' + height.toFixed(1) + '%"></b></i>';
       }).join('');
       tr.innerHTML = '<th>' + escapeHtml(label) + '</th><td class="saah-financial-trend' + (mixedSigns ? ' is-mixed' : '') + '"><span>' + trend + '</span></td>' + dates.map(date => '<td>' + escapeHtml(formatCell(cells.get(date)?.value ?? cells.get(date)?.raw_value)) + '</td>').join('');
@@ -195,7 +195,7 @@
         'earningsfromcontinuingoperations', 'netincome', 'nitocommonexclextraitems'
       ],
       'balance-sheet': [
-        'totalcashstinvestment', 'totalreceivables', 'totalcurrentassets',
+        'totalcashstinvestment', 'totalcashstinvestments', 'totalreceivables', 'totalcurrentassets',
         'netpropertyplantequipment', 'totalassets', 'totalcurrentliabilities',
         'totalliabilities', 'totalcommonequity', 'totalequity', 'totalliabilitiesandequity'
       ],

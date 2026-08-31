@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seeking Alpha Article Research Preview",
-  "version": "1.0.25",
+  "version": "1.0.28",
   "description": "Hover an author or Financials label on a Seeking Alpha article to preview ratings and financial statements.",
   "host_permissions": ["https://query1.finance.yahoo.com/*"],
   "background": { "service_worker": "background.js", "type": "module" },

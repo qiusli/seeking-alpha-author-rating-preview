@@ -8,7 +8,9 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
 });
 
 async function prices(symbol, period1) {
-  const ticker = symbol.replace('.', '-').toUpperCase();
+  const sourceTicker = symbol.replace('.', '-').toUpperCase();
+  // Seeking Alpha uses SP500 for the index; Yahoo Finance uses ^GSPC.
+  const ticker = sourceTicker === 'SP500' ? '^GSPC' : sourceTicker;
   const key = `${ticker}:${period1}`;
   if (cache.has(key)) return cache.get(key);
   const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`);
