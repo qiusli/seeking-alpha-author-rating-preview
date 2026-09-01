@@ -64,19 +64,19 @@
   function financialPanel(label) {
     const el = document.createElement('section');
     el.className = 'saah-panel saah-financial-panel';
-    el.innerHTML = '<div class="saah-header"><span>Financials</span><span class="saah-financial-ticker"></span></div><div class="saah-financial-tabs"><button data-statement="income-statement" type="button" class="is-active">Income statement</button><button data-statement="balance-sheet" type="button">Balance sheet</button><button data-statement="cash-flow-statement" type="button">Cash flow</button></div><div class="saah-financial-period"><span>Period</span><button data-period="quarterly" type="button" class="is-active">Quarterly</button><button data-period="annual" type="button">Annual</button></div><div class="saah-financial-body">Loading financials…</div><div class="saah-financial-scroll" aria-label="Scroll financial table horizontally"><div class="saah-financial-scroll-track"></div></div><div class="saah-resize-handle" aria-hidden="true"></div>';
+    el.innerHTML = '<div class="saah-ratings-block">Loading ratings…</div><div class="saah-financial-tabs"><button data-statement="income-statement" type="button" class="is-active">Income statement</button><button data-statement="balance-sheet" type="button">Balance sheet</button><button data-statement="cash-flow-statement" type="button">Cash flow</button></div><div class="saah-financial-period"><span>Period</span><button data-period="quarterly" type="button" class="is-active">Quarterly</button><button data-period="annual" type="button">Annual</button></div><div class="saah-financial-body">Loading financials…</div><div class="saah-financial-scroll" aria-label="Scroll financial table horizontally"><div class="saah-financial-scroll-track"></div></div><div class="saah-resize-handle" aria-hidden="true"></div>';
     document.body.append(el);
-    const state = { statement: 'income-statement', period: 'quarterly', loaded: false };
+    const state = { statement: 'income-statement', period: 'quarterly', financialLoaded: false, ratingsLoaded: false };
     const hide = () => setTimeout(() => { if (!el.matches(':hover') && !label.matches(':hover')) el.classList.remove('is-open'); }, 180);
-    const show = async () => { el.classList.add('is-open'); placeFinancial(label, el); if (!state.loaded) await loadFinancials(el, state); };
+    const show = async () => { el.classList.add('is-open'); placeFinancial(label, el); await Promise.all([state.financialLoaded ? Promise.resolve() : loadFinancials(el, state), state.ratingsLoaded ? Promise.resolve() : loadRatings(el, state)]); };
     label.addEventListener('mouseenter', show); label.addEventListener('mouseleave', hide); el.addEventListener('mouseleave', hide);
     el.querySelectorAll('[data-statement]').forEach(button => button.onclick = async () => {
-      state.statement = button.dataset.statement; state.loaded = false;
+      state.statement = button.dataset.statement; state.financialLoaded = false;
       el.querySelectorAll('[data-statement]').forEach(item => item.classList.toggle('is-active', item === button));
       await loadFinancials(el, state);
     });
     el.querySelectorAll('[data-period]').forEach(button => button.onclick = async () => {
-      state.period = button.dataset.period; state.loaded = false;
+      state.period = button.dataset.period; state.financialLoaded = false;
       el.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('is-active', item === button));
       await loadFinancials(el, state);
     });
@@ -114,16 +114,49 @@
     const body = el.querySelector('.saah-financial-body'); body.textContent = 'Loading financials…';
     try {
       const ticker = await articleTicker();
-      el.querySelector('.saah-financial-ticker').textContent = ticker;
       const key = [ticker, state.period, state.statement].join('|');
       let data = s.financialCache.get(key);
       if (!data) {
-        const path = '/api/v3/symbols/' + encodeURIComponent(ticker.toLowerCase()) + '/fundamentals_metrics?period_type=' + state.period + '&statement_type=' + state.statement + '&target_currency=USD';
+        // Seeking Alpha routes exchange-qualified symbols (for example VHI:CA)
+        // with a literal colon; encoding it as %3A returns a 404.
+        const symbolPath = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
+        const path = '/api/v3/symbols/' + symbolPath + '/fundamentals_metrics?period_type=' + state.period + '&statement_type=' + state.statement + '&target_currency=USD';
         data = await get(path); s.financialCache.set(key, data);
       }
-      renderFinancials(body, data, state.statement); state.loaded = true;
+      renderFinancials(body, data, state.statement); state.financialLoaded = true;
     } catch (error) { body.textContent = error.message || 'Financial data is unavailable.'; }
   }
+  async function loadRatings(el, state) {
+    const body = el.querySelector('.saah-ratings-block'); body.textContent = 'Loading ratings…';
+    try {
+      const ticker = await articleTicker();
+      const key = ['ratings', ticker].join('|');
+      let data = s.financialCache.get(key);
+      if (!data) {
+        const symbolPath = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
+        data = await get('/api/v3/symbols/' + symbolPath + '/rating/periods?filter[periods][]=0&filter[periods][]=3&filter[periods][]=6');
+        s.financialCache.set(key, data);
+      }
+      renderRatings(body, data); state.ratingsLoaded = true;
+    } catch (error) { body.textContent = error.message || 'Ratings data is unavailable.'; }
+  }
+  function renderRatings(root, response) {
+    const periods = (response?.data || []).map(item => item.attributes?.ratings).filter(Boolean);
+    const latest = periods[0];
+    if (!latest) { root.textContent = 'Ratings data is unavailable for this selection.'; return; }
+    const gradeRows = [
+      ['Valuation', 'valueGrade'], ['Growth', 'growthGrade'], ['Profitability', 'profitabilityGrade'],
+      ['Momentum', 'momentumGrade'], ['Revisions', 'epsRevisionsGrade']
+    ];
+    const ratingRows = [['SA Analysts', latest.authorsRating], ['Wall Street', latest.sellSideRating], ['Quant', latest.quantRating]];
+    const ratingRow = entry => entry ? '<div class="saah-rating-grid-row"><span>' + entry[0] + '</span><strong class="saah-rating-' + ratingClass(entry[1]) + '">' + ratingLabel(entry[1]) + '</strong><em class="saah-rating-' + ratingClass(entry[1]) + '">' + formatRating(entry[1]) + '</em></div>' : '';
+    const factorRow = ([label, key]) => '<div class="saah-factor-grid-row"><span>' + label + '</span>' + [0, 1, 2].map(index => '<b class="saah-grade-' + String(grade(periods[index]?.[key])).replace('+', 'plus').replace('-', 'minus') + '">' + grade(periods[index]?.[key]) + '</b>').join('') + '</div>';
+    root.innerHTML = '<section class="saah-ratings-card"><h3>Ratings and factor grades</h3><div class="saah-ratings-columns"><div class="saah-ratings-left"><div class="saah-ratings-grid-head">Ratings</div>' + ratingRows.map(ratingRow).join('') + '</div><div class="saah-ratings-right"><div class="saah-factor-grid-head"><span></span><span>Now</span><span>3M</span><span>6M</span></div>' + gradeRows.map(factorRow).join('') + '</div></div></section>';
+  }
+  function grade(value) { return ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F'][Number(value) - 1] || '—'; }
+  function ratingLabel(value) { const score = Number(value); return !Number.isFinite(score) ? '—' : score >= 4.5 ? 'Strong Buy' : score >= 3.5 ? 'Buy' : score >= 2.5 ? 'Hold' : score >= 1.5 ? 'Sell' : 'Strong Sell'; }
+  function ratingClass(value) { const score = Number(value); return !Number.isFinite(score) ? 'none' : score >= 4.5 ? 'strong-buy' : score >= 3.5 ? 'buy' : score >= 2.5 ? 'hold' : score >= 1.5 ? 'sell' : 'strong-sell'; }
+  function formatRating(value) { const score = Number(value); return Number.isFinite(score) ? score.toFixed(2) : '—'; }
   async function articleTicker() {
     if (s.articleTicker) return s.articleTicker;
     const id = location.pathname.match(/^\/article\/(\d+)/)?.[1];
