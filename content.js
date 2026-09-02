@@ -64,11 +64,11 @@
   function financialPanel(label) {
     const el = document.createElement('section');
     el.className = 'saah-panel saah-financial-panel';
-    el.innerHTML = '<div class="saah-ratings-block">Loading ratings…</div><div class="saah-financial-tabs"><button data-statement="income-statement" type="button" class="is-active">Income statement</button><button data-statement="balance-sheet" type="button">Balance sheet</button><button data-statement="cash-flow-statement" type="button">Cash flow</button></div><div class="saah-financial-period"><span>Period</span><button data-period="quarterly" type="button" class="is-active">Quarterly</button><button data-period="annual" type="button">Annual</button></div><div class="saah-financial-body">Loading financials…</div><div class="saah-financial-scroll" aria-label="Scroll financial table horizontally"><div class="saah-financial-scroll-track"></div></div><div class="saah-resize-handle" aria-hidden="true"></div>';
+    el.innerHTML = '<div class="saah-ratings-block">Loading ratings…</div><div class="saah-snapshot-block">Loading financial snapshot…</div><div class="saah-financial-tabs"><button data-statement="income-statement" type="button" class="is-active">Income statement</button><button data-statement="balance-sheet" type="button">Balance sheet</button><button data-statement="cash-flow-statement" type="button">Cash flow</button></div><div class="saah-financial-period"><span>Period</span><button data-period="quarterly" type="button" class="is-active">Quarterly</button><button data-period="annual" type="button">Annual</button></div><div class="saah-financial-body">Loading financials…</div><div class="saah-financial-scroll" aria-label="Scroll financial table horizontally"><div class="saah-financial-scroll-track"></div></div><div class="saah-resize-handle" aria-hidden="true"></div>';
     document.body.append(el);
-    const state = { statement: 'income-statement', period: 'quarterly', financialLoaded: false, ratingsLoaded: false };
+    const state = { statement: 'income-statement', period: 'quarterly', financialLoaded: false, ratingsLoaded: false, snapshotLoaded: false };
     const hide = () => setTimeout(() => { if (!el.matches(':hover') && !label.matches(':hover')) el.classList.remove('is-open'); }, 180);
-    const show = async () => { el.classList.add('is-open'); placeFinancial(label, el); await Promise.all([state.financialLoaded ? Promise.resolve() : loadFinancials(el, state), state.ratingsLoaded ? Promise.resolve() : loadRatings(el, state)]); };
+    const show = async () => { el.classList.add('is-open'); placeFinancial(label, el); await Promise.all([state.financialLoaded ? Promise.resolve() : loadFinancials(el, state), state.ratingsLoaded ? Promise.resolve() : loadRatings(el, state), state.snapshotLoaded ? Promise.resolve() : loadSnapshot(el, state)]); };
     label.addEventListener('mouseenter', show); label.addEventListener('mouseleave', hide); el.addEventListener('mouseleave', hide);
     el.querySelectorAll('[data-statement]').forEach(button => button.onclick = async () => {
       state.statement = button.dataset.statement; state.financialLoaded = false;
@@ -157,6 +157,85 @@
   function ratingLabel(value) { const score = Number(value); return !Number.isFinite(score) ? '—' : score >= 4.5 ? 'Strong Buy' : score >= 3.5 ? 'Buy' : score >= 2.5 ? 'Hold' : score >= 1.5 ? 'Sell' : 'Strong Sell'; }
   function ratingClass(value) { const score = Number(value); return !Number.isFinite(score) ? 'none' : score >= 4.5 ? 'strong-buy' : score >= 3.5 ? 'buy' : score >= 2.5 ? 'hold' : score >= 1.5 ? 'sell' : 'strong-sell'; }
   function formatRating(value) { const score = Number(value); return Number.isFinite(score) ? score.toFixed(2) : '—'; }
+  async function loadSnapshot(el, state) {
+    const root = el.querySelector('.saah-snapshot-block'); root.textContent = 'Loading financial snapshot…';
+    try {
+      const ticker = await articleTicker();
+      const [income, balance, cashflow, price] = await Promise.all([
+        annualStatement(ticker, 'income-statement'), annualStatement(ticker, 'balance-sheet'), annualStatement(ticker, 'cash-flow-statement'),
+        snapshotPrice(ticker).catch(() => null)
+      ]);
+      renderSnapshot(root, { income, balance, cashflow, quote: null, price }); state.snapshotLoaded = true;
+    } catch (error) { root.textContent = error.message || 'Financial snapshot is unavailable.'; }
+  }
+  async function annualStatement(ticker, statement) {
+    const key = [ticker, 'annual', statement].join('|');
+    let data = s.financialCache.get(key);
+    if (!data) {
+      const symbolPath = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
+      data = await get('/api/v3/symbols/' + symbolPath + '/fundamentals_metrics?period_type=annual&statement_type=' + statement + '&target_currency=USD');
+      s.financialCache.set(key, data);
+    }
+    return data;
+  }
+  function snapshotPrice(symbol) {
+    const period1 = Math.floor(Date.now() / 1000) - 14 * 24 * 60 * 60;
+    return new Promise((resolve, reject) => chrome.runtime.sendMessage({ type: 'price-history', symbol, period1 }, response => {
+      if (chrome.runtime.lastError || !response?.ok) reject(Error(response?.error || 'Price data unavailable'));
+      else resolve(response.points?.at(-1)?.[1]);
+    }));
+  }
+  function renderSnapshot(root, data) {
+    const revenue = snapshotMetric(data.income, ['revenues', 'revenue']);
+    const grossProfit = snapshotMetric(data.income, ['grossprofit']);
+    const operatingIncome = snapshotMetric(data.income, ['operatingincome']);
+    const pretaxIncome = snapshotMetric(data.income, ['pretaxincome', 'earningsbeforetax', 'incomebeforetax']);
+    const netIncome = snapshotMetric(data.income, ['netincome']);
+    const assets = snapshotMetric(data.balance, ['totalassets']);
+    const equity = snapshotMetric(data.balance, ['totalcommonequity', 'totalequity']);
+    const currentAssets = snapshotMetric(data.balance, ['totalcurrentassets']);
+    const currentLiabilities = snapshotMetric(data.balance, ['totalcurrentliabilities']);
+    const cash = snapshotMetric(data.balance, ['cashandcashequivalents', 'cashcashequivalents', 'totalcashstinvestments', 'totalcashstinvestment']);
+    const receivables = snapshotMetric(data.balance, ['totalreceivables', 'accountsreceivable']);
+    const debt = snapshotMetric(data.balance, ['totaldebt', 'longtermdebt']);
+    const cashFromOperations = snapshotMetric(data.cashflow, ['cashfromoperations', 'operatingcashflow']);
+    const shares = snapshotMetric(data.income, ['weightedaveragesharesoutstanding', 'weightedaveragedilutedsharesoutstanding', 'dilutedweightedaveragesharesoutstanding', 'dilutedsharesoutstanding']) || snapshotMetric(data.balance, ['commonsharesoutstanding', 'sharesoutstanding']);
+    const quote = data.quote || {}, price = Number(data.price);
+    const reportedMarketCap = Number(quote.marketCap), derivedMarketCap = price * shares;
+    const marketCap = Number.isFinite(reportedMarketCap) && reportedMarketCap > 0 ? reportedMarketCap : derivedMarketCap;
+    const reportedEnterpriseValue = Number(quote.enterpriseValue);
+    const enterpriseValue = Number.isFinite(reportedEnterpriseValue) && reportedEnterpriseValue > 0 ? reportedEnterpriseValue : marketCap + (debt || 0) - (cash || 0);
+    const ratio = (numerator, denominator) => Number.isFinite(numerator) && Number.isFinite(denominator) && denominator !== 0 ? numerator / denominator : null;
+    const first = (...values) => values.find(value => Number.isFinite(value)) ?? null;
+    const valuation = [
+      ['P/E', first(Number(quote.trailingPE), ratio(marketCap, netIncome))],
+      ['P/S', first(Number(quote.priceToSalesTrailing12Months), ratio(marketCap, revenue))],
+      ['P/B', first(Number(quote.priceToBook), ratio(marketCap, equity))],
+      ['P / Cash flow', ratio(marketCap, cashFromOperations)],
+      ['EV / Sales', first(Number(quote.enterpriseToRevenue), ratio(enterpriseValue, revenue))]
+    ];
+    const profitability = [['Gross margin', ratio(grossProfit, revenue)], ['Operating margin', ratio(operatingIncome, revenue)], ['Pretax margin', ratio(pretaxIncome, revenue)], ['Net margin', ratio(netIncome, revenue)], ['Return on assets', ratio(netIncome, assets)], ['Return on equity', ratio(netIncome, equity)]];
+    const efficiency = [['Asset turnover', ratio(revenue, assets)]];
+    const liquidity = [['Current ratio', ratio(currentAssets, currentLiabilities)], ['Quick ratio', ratio((cash || 0) + (receivables || 0), currentLiabilities)], ['Cash ratio', ratio(cash, currentLiabilities)]];
+    const capitalization = [['Debt / equity', ratio(debt, equity)], ['Debt / assets', ratio(debt, assets)], ['Debt / capital', ratio(debt, (debt || 0) + (equity || 0))]];
+    const section = (title, rows, percent) => {
+      const present = rows.filter(([, value]) => Number.isFinite(value));
+      return present.length ? '<section><h3>' + title + '</h3>' + present.map(([label, value]) => '<div><span>' + label + '</span><strong>' + (percent ? snapshotPercent(value) : snapshotNumber(value)) + '</strong></div>').join('') + '</section>' : '';
+    };
+    const html = section('Valuation', valuation, false) + section('Profitability', profitability, true) + section('Efficiency', efficiency, false) + section('Liquidity', liquidity, false) + section('Capitalization', capitalization, true);
+    root.innerHTML = html ? '<div class="saah-snapshot-grid">' + html + '</div>' : 'Financial snapshot is unavailable for this selection.';
+  }
+  function snapshotMetric(response, names) {
+    const rows = (Array.isArray(response) ? response : response?.data || []).flatMap(section => section.rows || []);
+    for (const name of names) {
+      const row = rows.find(item => normalize(item.value || item.name).includes(name));
+      const cells = row?.cells || [], cell = [...cells].reverse().find(item => Number.isFinite(Number(item.raw_value)));
+      if (cell) return Number(cell.raw_value);
+    }
+    return null;
+  }
+  function snapshotNumber(value) { return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'; }
+  function snapshotPercent(value) { return Number.isFinite(value) ? (value * 100).toFixed(1) + '%' : '—'; }
   async function articleTicker() {
     if (s.articleTicker) return s.articleTicker;
     const id = location.pathname.match(/^\/article\/(\d+)/)?.[1];
