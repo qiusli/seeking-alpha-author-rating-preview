@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Seeking Alpha Article Research Preview",
-  "version": "1.0.42",
+  "version": "1.0.61",
   "description": "Hover an author or Financials label on a Seeking Alpha article to preview ratings and financial statements.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -9,7 +9,7 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "host_permissions": ["https://query1.finance.yahoo.com/*"],
+  "host_permissions": ["https://query1.finance.yahoo.com/*", "https://api.nasdaq.com/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{
     "matches": ["https://seekingalpha.com/article/*"],
