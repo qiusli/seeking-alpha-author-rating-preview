@@ -1,15 +1,10 @@
-if (!globalThis.__saahContentLoaded) {
-globalThis.__saahContentLoaded = true;
+if (globalThis.__saahContentVersion !== '2.0.0') {
+globalThis.__saahContentVersion = '2.0.0';
 (() => {
   const PAGE = 10, WINDOW = 365 * 86400;
   const color = { very_bullish: '#2f7d45', bullish: '#8acb8c', neutral: '#f8df63', bearish: '#ed7474', very_bearish: '#a63232' };
   const defaultPriceColor = '#75838a';
-  const s = { slug: '', page: 0, articles: [], articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map() };
-  chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-    if (message?.type !== 'open-financial-modal' && message?.type !== 'open-financial-modal-v2') return;
-    openFinancialModal(String(message.ticker || '').toUpperCase());
-    respond({ ok: true });
-  });
+  const s = { slug: '', page: 0, articles: [], articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), financialLoads: new Map() };
 
   function author() {
     return [...document.querySelectorAll('a[href*="/author/"]')].find(a => {
@@ -38,7 +33,6 @@ globalThis.__saahContentLoaded = true;
     requestAnimationFrame(positionLabel);
     s.panel = panel(label);
     s.financialPanel = financialPanel(financialLabel);
-    financialLabel.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); openFinancialSearch(); });
     ensure().then(() => preloadGraphs(PAGE)).then(() => label.classList.remove('is-loading')).catch(() => {});
   }
   function positionLabel() {
@@ -106,51 +100,6 @@ globalThis.__saahContentLoaded = true;
     makeResizable(el);
     return el;
   }
-  function openFinancialSearch() {
-    document.querySelector('.saah-modal-backdrop')?.remove();
-    const overlay = document.createElement('div');
-    overlay.className = 'saah-modal-backdrop';
-    overlay.innerHTML = '<form class="saah-ticker-search"><button type="button" class="saah-modal-close" aria-label="Close">×</button><h2>Financials</h2><p>Enter a ticker to open its financial preview.</p><input name="ticker" autocomplete="off" autocapitalize="characters" placeholder="e.g. NVDA or VHI:CA" required><button type="submit">Open financials</button></form>';
-    const close = () => overlay.remove();
-    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
-    overlay.querySelector('.saah-modal-close').onclick = close;
-    overlay.querySelector('form').onsubmit = event => {
-      event.preventDefault();
-      const ticker = String(new FormData(event.currentTarget).get('ticker') || '').trim().toUpperCase();
-      if (/^[A-Z0-9.-]+(?::[A-Z0-9.-]+)?$/.test(ticker)) openFinancialModal(ticker);
-    };
-    document.body.append(overlay);
-    requestAnimationFrame(() => overlay.querySelector('input').focus());
-  }
-  function openFinancialModal(ticker) {
-    document.querySelector('.saah-modal-backdrop')?.remove();
-    const overlay = document.createElement('div');
-    overlay.className = 'saah-modal-backdrop';
-    const el = document.createElement('section');
-    el.className = 'saah-panel saah-financial-panel saah-financial-modal is-open';
-    el.innerHTML = '<div class="saah-modal-title"><strong>' + escapeHtml(ticker) + ' financials</strong><button type="button" class="saah-modal-close" aria-label="Close">×</button></div><div class="saah-author-ratings-block">Loading recent analyst ratings…</div><div class="saah-ratings-block">Loading ratings…</div><div class="saah-snapshot-block">Loading financial snapshot…</div><h3 class="saah-section-title">Insider actions</h3><section class="saah-insider-block"><p>Total insider purchases and sales reported in each period.</p><div class="saah-insider-summary">Loading recent insider activity…</div></section><div class="saah-financial-quick"><div class="saah-financial-quick-heading"><h3 class="saah-section-title">Financial Statement Highlights</h3><div class="saah-quick-period"><button data-highlight-period="quarterly" type="button" class="is-active">Quarterly</button><button data-highlight-period="annual" type="button">Annual</button></div></div><div class="saah-financial-quick-content">Loading statement highlights…</div></div><h3 class="saah-section-title">Financial statements</h3><div class="saah-financial-tabs saah-quick-period"><button data-statement="income-statement" type="button" class="is-active">Income statement</button><button data-statement="balance-sheet" type="button">Balance sheet</button><button data-statement="cash-flow-statement" type="button">Cash flow</button></div><div class="saah-quick-period saah-statement-period"><button data-statement-period="quarterly" type="button" class="is-active">Quarterly</button><button data-statement-period="annual" type="button">Annual</button></div><div class="saah-financial-body">Loading financials…</div>';
-    overlay.append(el); document.body.append(overlay);
-    const close = () => overlay.remove();
-    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
-    el.querySelector('.saah-modal-close').onclick = close;
-    const state = { ticker, statement: 'income-statement', statementPeriod: 'quarterly', highlightPeriod: 'quarterly', financialLoaded: false, authorRatingsLoaded: false, ratingsLoaded: false, snapshotLoaded: false, insiderLoaded: false, quickPeriod: null };
-    el.querySelectorAll('[data-statement]').forEach(button => button.onclick = async () => {
-      state.statement = button.dataset.statement; state.financialLoaded = false;
-      el.querySelectorAll('[data-statement]').forEach(item => item.classList.toggle('is-active', item === button));
-      await loadFinancials(el, state);
-    });
-    el.querySelectorAll('[data-highlight-period]').forEach(button => button.onclick = async () => {
-      state.highlightPeriod = button.dataset.highlightPeriod; state.quickPeriod = null;
-      el.querySelectorAll('[data-highlight-period]').forEach(item => item.classList.toggle('is-active', item === button));
-      await loadFinancialHighlights(el, state);
-    });
-    el.querySelectorAll('[data-statement-period]').forEach(button => button.onclick = async () => {
-      state.statementPeriod = button.dataset.statementPeriod; state.financialLoaded = false;
-      el.querySelectorAll('[data-statement-period]').forEach(item => item.classList.toggle('is-active', item === button));
-      await loadFinancials(el, state);
-    });
-    Promise.all([loadFinancials(el, state), loadAuthorRatings(el, state), loadRatings(el, state), loadSnapshot(el, state), loadInsiders(el, state), loadFinancialHighlights(el, state)]).catch(() => {});
-  }
   async function tickerFor(state) { return state?.ticker || articleTicker(); }
   async function loadInsiders(el, state) {
     const summary = el.querySelector('.saah-insider-summary'); summary.textContent = 'Loading recent insider activity…';
@@ -195,14 +144,13 @@ globalThis.__saahContentLoaded = true;
     try {
       const ticker = await tickerFor(state);
       const key = [ticker, state.statementPeriod, state.statement].join('|');
-      let data = s.financialCache.get(key);
-      if (!data) {
+      const data = await cachedFinancial(key, () => {
         // Seeking Alpha routes exchange-qualified symbols (for example VHI:CA)
         // with a literal colon; encoding it as %3A returns a 404.
         const symbolPath = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
         const path = '/api/v3/symbols/' + symbolPath + '/fundamentals_metrics?period_type=' + state.statementPeriod + '&statement_type=' + state.statement + '&target_currency=USD';
-        data = await get(path); s.financialCache.set(key, data);
-      }
+        return get(path);
+      });
       renderFinancials(body, data, state.statement); state.financialLoaded = true;
     } catch (error) { body.textContent = error.message || 'Financial data is unavailable.'; }
   }
@@ -225,12 +173,10 @@ globalThis.__saahContentLoaded = true;
     try {
       const ticker = await tickerFor(state);
       const key = ['ratings', ticker].join('|');
-      let data = s.financialCache.get(key);
-      if (!data) {
+      const data = await cachedFinancial(key, () => {
         const symbolPath = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
-        data = await get('/api/v3/symbols/' + symbolPath + '/rating/periods?filter[periods][]=0&filter[periods][]=3&filter[periods][]=6');
-        s.financialCache.set(key, data);
-      }
+        return get('/api/v3/symbols/' + symbolPath + '/rating/periods?filter[periods][]=0&filter[periods][]=3&filter[periods][]=6');
+      });
       renderRatings(body, data); state.ratingsLoaded = true;
     } catch (error) { body.textContent = error.message || 'Ratings data is unavailable.'; }
   }
@@ -240,13 +186,11 @@ globalThis.__saahContentLoaded = true;
     try {
       const ticker = await tickerFor(state);
       const key = ['author-ratings', ticker].join('|');
-      let data = s.financialCache.get(key);
-      if (!data) {
+      const data = await cachedFinancial(key, () => {
         const since = Math.floor(Date.now() / 1000) - 62 * 86400;
         const symbol = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
-        data = await get('/api/v3/feed?any_primary[]=' + symbol + '&filter[since]=' + since + '&include=primaryTickers,sentiments,author&models[]=Article&page[size]=100');
-        s.financialCache.set(key, data);
-      }
+        return get('/api/v3/feed?any_primary[]=' + symbol + '&filter[since]=' + since + '&include=primaryTickers,sentiments,author&models[]=Article&page[size]=100');
+      });
       renderAuthorRatings(root, data);
       state.authorRatingsLoaded = true;
     } catch (error) { root.textContent = error.message || 'Recent analyst ratings are unavailable.'; }
@@ -312,13 +256,21 @@ globalThis.__saahContentLoaded = true;
   }
   async function financialStatement(ticker, period, statement) {
     const key = [ticker, period, statement].join('|');
-    let data = s.financialCache.get(key);
-    if (!data) {
+    return cachedFinancial(key, () => {
       const symbolPath = encodeURIComponent(ticker.toLowerCase()).replace(/%3A/gi, ':');
-      data = await get('/api/v3/symbols/' + symbolPath + '/fundamentals_metrics?period_type=' + period + '&statement_type=' + statement + '&target_currency=USD');
+      return get('/api/v3/symbols/' + symbolPath + '/fundamentals_metrics?period_type=' + period + '&statement_type=' + statement + '&target_currency=USD');
+    });
+  }
+  async function cachedFinancial(key, fetcher) {
+    if (s.financialCache.has(key)) return s.financialCache.get(key);
+    if (s.financialLoads.has(key)) return s.financialLoads.get(key);
+    const load = Promise.resolve().then(fetcher);
+    s.financialLoads.set(key, load);
+    try {
+      const data = await load;
       s.financialCache.set(key, data);
-    }
-    return data;
+      return data;
+    } finally { s.financialLoads.delete(key); }
   }
   async function snapshotPrice(symbol) { return (await price(symbol)).at(-1)?.[1] ?? null; }
   function renderSnapshot(root, data) {
@@ -596,15 +548,9 @@ globalThis.__saahContentLoaded = true;
     try { return await load; } finally { s.historyLoads.delete(ticker); }
   }
   async function get(path) {
-    if (location.hostname === 'seekingalpha.com' || location.hostname.endsWith('.seekingalpha.com')) {
-      const response = await fetch(path, { credentials: 'include' });
-      if (!response.ok) throw Error('Seeking Alpha returned ' + response.status);
-      return response.json();
-    }
-    return new Promise((resolve, reject) => chrome.runtime.sendMessage({ type: 'seeking-alpha-api', path }, response => {
-      if (chrome.runtime.lastError || !response?.ok) reject(Error(response?.error || 'Seeking Alpha data is unavailable'));
-      else resolve(response.data);
-    }));
+    const response = await fetch(path, { credentials: 'include' });
+    if (!response.ok) throw Error('Seeking Alpha returned ' + response.status);
+    return response.json();
   }
   const priceCache = new Map();
   function price(symbol) {
@@ -712,7 +658,7 @@ globalThis.__saahContentLoaded = true;
     s.financialLabel?.remove();
     s.panel?.remove();
     s.financialPanel?.remove();
-    Object.assign(s, { slug: '', page: 0, articles: [], articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), panel: null, financialPanel: null });
+    Object.assign(s, { slug: '', page: 0, articles: [], articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), financialLoads: new Map(), panel: null, financialPanel: null });
   }
   addEventListener('resize', () => { positionLabel(); if (s.panel?.classList.contains('is-open')) { place(s.label); render(); } if (s.financialPanel?.classList.contains('is-open')) placeFinancial(s.financialLabel, s.financialPanel); });
   addEventListener('scroll', positionLabel, true);

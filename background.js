@@ -1,20 +1,12 @@
 const secCache = new Map();
 
 chrome.runtime.onMessage.addListener((message, _sender, respond) => {
-  const task = message?.type === 'seeking-alpha-api' ? seekingAlphaApi(message.path).then(data => ({ data }))
-    : message?.type === 'insider-activity' ? insiderActivity(message.symbol).then(data => ({ data })) : null;
+  const task = message?.type === 'insider-activity' ? insiderActivity(message.symbol).then(data => ({ data })) : null;
   if (!task) return;
   task.then(result => respond({ ok: true, ...result }))
     .catch(error => respond({ ok: false, error: error.message }));
   return true;
 });
-
-async function seekingAlphaApi(path) {
-  if (typeof path !== 'string' || !path.startsWith('/api/')) throw new Error('Invalid Seeking Alpha request');
-  const response = await fetch('https://seekingalpha.com' + path, { credentials: 'include' });
-  if (!response.ok) throw new Error('Seeking Alpha returned ' + response.status);
-  return response.json();
-}
 
 async function insiderActivity(symbol) {
   const ticker = symbol.replace('.', '-').toUpperCase();
