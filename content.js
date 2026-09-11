@@ -199,7 +199,7 @@ globalThis.__saahContentVersion = '2.0.0';
     const included = response?.included || [];
     const byKey = new Map(included.map(item => [item.type + ':' + item.id, item]));
     const sentiments = new Map(included.filter(item => item.type === 'sentiment').map(item => [String(item.attributes?.articleId), item.attributes]));
-    const nameFor = article => {
+    const authorFor = article => {
       const attrs = article.attributes || {};
       const relation = article.relationships?.author?.data || article.relationships?.authors?.data || article.relationships?.user?.data;
       const reference = Array.isArray(relation) ? relation[0] : relation;
@@ -207,16 +207,18 @@ globalThis.__saahContentVersion = '2.0.0';
       const authorAttrs = author?.attributes || {};
       const candidates = [attrs.authorName, attrs.author_name, attrs.authorDisplayName, attrs.userName, attrs.author?.name, attrs.author?.displayName, attrs.author?.username, attrs.user?.name, attrs.user?.username, authorAttrs.displayName, authorAttrs.fullName, authorAttrs.nickname, authorAttrs.username, authorAttrs.slug, authorAttrs.name];
       const name = candidates.find(value => typeof value === 'string' && /[a-z]/i.test(value) && !/^\d+$/.test(value.trim()));
-      return name ? titleCaseAuthor(name.replace(/-/g, ' ')) : '';
+      const slugCandidates = [attrs.authorSlug, attrs.author_slug, attrs.author?.slug, attrs.author?.username, authorAttrs.slug, authorAttrs.username];
+      const slug = slugCandidates.find(value => typeof value === 'string' && /^[a-z0-9-]+$/i.test(value));
+      return name ? { name: titleCaseAuthor(name.replace(/-/g, ' ')), slug: slug || name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') } : null;
     };
     const rows = (response?.data || []).map(article => {
       const sentiment = sentiments.get(String(article.id));
-      const name = nameFor(article);
+      const author = authorFor(article);
       const time = [article.attributes?.publishOn, article.attributes?.publishedAt, article.attributes?.createdAt, sentiment?.createdAt].map(timestamp).find(Number.isFinite);
-      return name && sentiment?.type && Number.isFinite(time) ? { name, type: sentiment.type, time } : null;
+      return author && sentiment?.type && Number.isFinite(time) ? { ...author, type: sentiment.type, time } : null;
     }).filter(Boolean).sort((a, b) => b.time - a.time);
     if (!rows.length) { root.textContent = 'No SA analyst ratings were published in the past 2 months.'; return; }
-    root.innerHTML = '<h3 class="saah-section-title">Recent SA analyst ratings <span>Last 2 months</span></h3><section class="saah-author-ratings-card"><div class="saah-author-ratings-head"><span>Author</span><span>Rating</span><span>Date</span></div>' + rows.map(row => '<div class="saah-author-rating-row"><span title="' + escapeHtml(row.name) + '">' + escapeHtml(row.name) + '</span><b class="saah-rating-' + sentimentClass(row.type) + '">' + escapeHtml(sentimentLabel(row.type)) + '</b><time>' + escapeHtml(new Date(row.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) + '</time></div>').join('') + '</section>';
+    root.innerHTML = '<h3 class="saah-section-title">Recent SA analyst ratings <span>Last 2 months</span></h3><section class="saah-author-ratings-card"><div class="saah-author-ratings-head"><span>Author</span><span>Rating</span><span>Date</span></div>' + rows.map(row => '<div class="saah-author-rating-row"><a href="/author/' + encodeURIComponent(row.slug) + '" title="View ' + escapeHtml(row.name) + '\'s author page">' + escapeHtml(row.name) + '</a><b class="saah-rating-' + sentimentClass(row.type) + '">' + escapeHtml(sentimentLabel(row.type)) + '</b><time>' + escapeHtml(new Date(row.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) + '</time></div>').join('') + '</section>';
   }
   function titleCaseAuthor(name) {
     return name.split(/(\s+)/).map(part => /^\s+$/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)).join('');
