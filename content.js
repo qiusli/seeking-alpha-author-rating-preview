@@ -1,5 +1,5 @@
-if (globalThis.__saahContentVersion !== '2.0.0') {
-globalThis.__saahContentVersion = '2.0.0';
+if (globalThis.__saahContentVersion !== '2.0.5') {
+globalThis.__saahContentVersion = '2.0.5';
 (() => {
   const PAGE = 10, WINDOW = 365 * 86400;
   const color = { very_bullish: '#2f7d45', bullish: '#8acb8c', neutral: '#f8df63', bearish: '#ed7474', very_bearish: '#a63232' };
@@ -407,7 +407,12 @@ globalThis.__saahContentVersion = '2.0.0';
     const rows = sections.flatMap(section => (section.rows || []).map(row => ({ ...row, section: section.title })));
     const firstRow = rows.find(row => Array.isArray(row.cells) && row.cells.length);
     if (!firstRow) { root.textContent = 'Financial data is unavailable for this selection.'; return; }
-    const dates = firstRow.cells.map(cell => cell.name).filter(Boolean).slice(-12).reverse();
+    // The API can return cells newest-first or oldest-first. Sort by the
+    // actual period, then retain the newest twelve rather than blindly taking
+    // the final array entries (which omitted the current periods on some rows).
+    const periods = firstRow.cells.map((cell, index) => ({ name: cell.name, index, time: periodTimestamp(cell.name) })).filter(period => period.name);
+    const datedPeriods = periods.filter(period => Number.isFinite(period.time));
+    const dates = (datedPeriods.length ? datedPeriods.sort((a, b) => a.time - b.time) : periods).slice(-12).map(period => period.name);
     const table = document.createElement('table'); table.className = 'saah-financial-table';
     table.innerHTML = '<thead><tr><th>Line item</th><th class="saah-financial-trend-head">Trend</th>' + dates.map(date => '<th>' + escapeHtml(formatPeriod(date)) + '</th>').join('') + '</tr></thead>';
     const body = document.createElement('tbody');
@@ -434,7 +439,8 @@ globalThis.__saahContentVersion = '2.0.0';
       tr.className = (key ? 'is-key ' : '') + 'is-indented';
       const trend = dates.map(date => {
         const raw = Number(cells.get(date)?.raw_value);
-        const height = !Number.isFinite(raw) ? 0 : mixedSigns ? Math.abs(raw) / maximum * 50 : negativeOnly ? Math.abs(raw) / negativeMaximum * 50 : Math.abs(raw) / maximum * 100;
+        if (!Number.isFinite(raw) || raw === 0) return '<i class="saah-financial-trend-slot"></i>';
+        const height = mixedSigns ? Math.abs(raw) / maximum * 50 : negativeOnly ? Math.abs(raw) / negativeMaximum * 50 : Math.abs(raw) / maximum * 100;
         return '<i class="saah-financial-trend-slot"><b class="' + (raw < 0 ? 'is-negative' : 'is-positive') + '" style="--bar-height:' + height.toFixed(1) + '%"></b></i>';
       }).join('');
       tr.innerHTML = '<th>' + escapeHtml(label) + '</th><td class="saah-financial-trend' + (mixedSigns ? ' is-mixed' : '') + '"><span>' + trend + '</span></td>' + dates.map(date => '<td>' + escapeHtml(formatCell(cells.get(date)?.value ?? cells.get(date)?.raw_value)) + '</td>').join('');
@@ -450,6 +456,12 @@ globalThis.__saahContentVersion = '2.0.0';
     slider.scrollLeft = body.scrollLeft;
   }
   function prettyMetric(value) { return String(value).replace(/[_-]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase()); }
+  function periodTimestamp(value) {
+    const text = String(value || '').trim();
+    if (/^\d{4}$/.test(text)) return Date.UTC(Number(text), 11, 31);
+    const time = new Date(text).getTime();
+    return Number.isFinite(time) ? time : NaN;
+  }
   function normalize(value) { return String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase(); }
   function isKeyMetric(statement, value) {
     const metric = normalize(value);
