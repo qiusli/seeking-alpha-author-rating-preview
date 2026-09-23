@@ -1,5 +1,5 @@
-if (globalThis.__saahContentVersion !== '2.0.5') {
-globalThis.__saahContentVersion = '2.0.5';
+if (globalThis.__saahContentVersion !== '2.1.2') {
+globalThis.__saahContentVersion = '2.1.2';
 (() => {
   const PAGE = 10, WINDOW = 365 * 86400;
   const color = { very_bullish: '#2f7d45', bullish: '#8acb8c', neutral: '#f8df63', bearish: '#ed7474', very_bearish: '#a63232' };
@@ -14,7 +14,34 @@ globalThis.__saahContentVersion = '2.0.5';
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     });
   }
+  function symbolTicker() {
+    const match = location.pathname.match(/^\/symbol\/([^/]+)/);
+    if (!match) return null;
+    try {
+      const ticker = decodeURIComponent(match[1]).toUpperCase();
+      return /^[A-Z0-9.-]+(?::[A-Z0-9.-]+)?$/.test(ticker) ? ticker : null;
+    } catch { return null; }
+  }
+  let activeUrl = location.href;
   async function init() {
+    if (location.href !== activeUrl) { activeUrl = location.href; clearPreview(); }
+    const ticker = symbolTicker();
+    if (ticker) {
+      const heading = [...document.querySelectorAll('h1')].find(node => node.getBoundingClientRect().width > 0 && node.textContent.toUpperCase().includes(ticker));
+      if (!heading) { positionLabel(); return; }
+      if (s.authorLink !== heading) s.authorLink?.classList.remove('saah-symbol-heading');
+      heading.classList.add('saah-symbol-heading');
+      s.authorLink = heading;
+      s.articleTicker = ticker;
+      if (!s.financialLabel?.isConnected) {
+        s.financialPanel?.remove();
+        s.financialLabel = Object.assign(document.createElement('span'), { className: 'saah-label saah-financial-label saah-symbol-financial-label', textContent: 'Financials' });
+        document.body.append(s.financialLabel);
+        s.financialPanel = financialPanel(s.financialLabel);
+      }
+      positionLabel();
+      return;
+    }
     if (!location.pathname.startsWith('/article/')) return;
     const link = author(); if (!link) return;
     if (s.label && (!s.label.isConnected || !s.financialLabel?.isConnected)) clearPreview();
@@ -36,6 +63,15 @@ globalThis.__saahContentVersion = '2.0.5';
     ensure().then(() => preloadGraphs(PAGE)).then(() => label.classList.remove('is-loading')).catch(() => {});
   }
   function positionLabel() {
+    if (symbolTicker() && s.financialLabel) {
+      const label = s.financialLabel, anchor = s.authorLink;
+      if (!anchor?.isConnected) { label.style.display = 'none'; return; }
+      const r = anchor.getBoundingClientRect();
+      label.style.display = r.width > 0 && r.bottom > 0 && r.top < innerHeight ? 'inline-flex' : 'none';
+      label.style.left = Math.max(12, Math.min(r.left, innerWidth - label.offsetWidth - 12)) + 'px';
+      label.style.top = (r.bottom - label.offsetHeight - 6) + 'px';
+      return;
+    }
     if (!s.label || !s.financialLabel) return;
     if (!s.authorLink?.isConnected) { s.label.style.display = 'none'; s.financialLabel.style.display = 'none'; return; }
     const r = s.authorLink.getBoundingClientRect();
@@ -71,7 +107,7 @@ globalThis.__saahContentVersion = '2.0.5';
     el.className = 'saah-panel saah-financial-panel';
     el.innerHTML = '<div class="saah-author-ratings-block">Loading recent analyst ratings…</div><div class="saah-ratings-block">Loading ratings…</div><div class="saah-snapshot-block">Loading financial snapshot…</div><h3 class="saah-section-title">Insider actions</h3><section class="saah-insider-block"><p>Total insider purchases and sales reported in each period.</p><div class="saah-insider-summary">Loading recent insider activity…</div></section><div class="saah-financial-quick"><div class="saah-financial-quick-heading"><h3 class="saah-section-title">Financial Statement Highlights</h3><div class="saah-quick-period"><button data-highlight-period="quarterly" type="button" class="is-active">Quarterly</button><button data-highlight-period="annual" type="button">Annual</button></div></div><div class="saah-financial-quick-content">Loading statement highlights…</div></div><h3 class="saah-section-title">Financial statements</h3><div class="saah-financial-tabs saah-quick-period"><button data-statement="income-statement" type="button" class="is-active">Income statement</button><button data-statement="balance-sheet" type="button">Balance sheet</button><button data-statement="cash-flow-statement" type="button">Cash flow</button></div><div class="saah-quick-period saah-statement-period"><button data-statement-period="quarterly" type="button" class="is-active">Quarterly</button><button data-statement-period="annual" type="button">Annual</button></div><div class="saah-financial-body">Loading financials…</div><div class="saah-financial-scroll" aria-label="Scroll financial table horizontally"><div class="saah-financial-scroll-track"></div></div><div class="saah-resize-handle" aria-hidden="true"></div>';
     document.body.append(el);
-    const state = { statement: 'income-statement', statementPeriod: 'quarterly', highlightPeriod: 'quarterly', financialLoaded: false, authorRatingsLoaded: false, ratingsLoaded: false, snapshotLoaded: false, insiderLoaded: false, quickPeriod: null };
+    const state = { ticker: symbolTicker(), statement: 'income-statement', statementPeriod: 'quarterly', highlightPeriod: 'quarterly', financialLoaded: false, authorRatingsLoaded: false, ratingsLoaded: false, snapshotLoaded: false, insiderLoaded: false, quickPeriod: null };
     const hide = () => setTimeout(() => { if (!el.matches(':hover') && !label.matches(':hover')) el.classList.remove('is-open'); }, 180);
     const show = async () => { el.classList.add('is-open'); placeFinancial(label, el); await Promise.all([state.financialLoaded ? Promise.resolve() : loadFinancials(el, state), state.authorRatingsLoaded ? Promise.resolve() : loadAuthorRatings(el, state), state.ratingsLoaded ? Promise.resolve() : loadRatings(el, state), state.snapshotLoaded ? Promise.resolve() : loadSnapshot(el, state), state.insiderLoaded ? Promise.resolve() : loadInsiders(el, state), state.quickPeriod === state.highlightPeriod ? Promise.resolve() : loadFinancialHighlights(el, state)]); };
     label.addEventListener('mouseenter', show); label.addEventListener('mouseleave', hide); el.addEventListener('mouseleave', hide);
@@ -407,12 +443,11 @@ globalThis.__saahContentVersion = '2.0.5';
     const rows = sections.flatMap(section => (section.rows || []).map(row => ({ ...row, section: section.title })));
     const firstRow = rows.find(row => Array.isArray(row.cells) && row.cells.length);
     if (!firstRow) { root.textContent = 'Financial data is unavailable for this selection.'; return; }
-    // The API can return cells newest-first or oldest-first. Sort by the
-    // actual period, then retain the newest twelve rather than blindly taking
-    // the final array entries (which omitted the current periods on some rows).
+    // The API can return cells newest-first or oldest-first. Select the newest
+    // twelve by date, then keep Seeking Alpha's newest-to-oldest display order.
     const periods = firstRow.cells.map((cell, index) => ({ name: cell.name, index, time: periodTimestamp(cell.name) })).filter(period => period.name);
     const datedPeriods = periods.filter(period => Number.isFinite(period.time));
-    const dates = (datedPeriods.length ? datedPeriods.sort((a, b) => a.time - b.time) : periods).slice(-12).map(period => period.name);
+    const dates = (datedPeriods.length ? datedPeriods.sort((a, b) => b.time - a.time) : periods).slice(0, 12).map(period => period.name);
     const table = document.createElement('table'); table.className = 'saah-financial-table';
     table.innerHTML = '<thead><tr><th>Line item</th><th class="saah-financial-trend-head">Trend</th>' + dates.map(date => '<th>' + escapeHtml(formatPeriod(date)) + '</th>').join('') + '</tr></thead>';
     const body = document.createElement('tbody');
@@ -668,6 +703,7 @@ globalThis.__saahContentVersion = '2.0.5';
   function chartDate(time) { const date = new Date(time); return String(date.getMonth() + 1).padStart(2, '0') + '/' + String(date.getDate()).padStart(2, '0') + '/' + date.getFullYear(); }
   function status(text) { const el = s.panel?.querySelector('.saah-status'); if (el) el.textContent = text; }
   function clearPreview() {
+    s.authorLink?.classList.remove('saah-symbol-heading');
     s.label?.remove();
     s.financialLabel?.remove();
     s.panel?.remove();
@@ -681,7 +717,7 @@ globalThis.__saahContentVersion = '2.0.5';
   // Reattach the label if that client-side render removes it.
   let queued = false;
   new MutationObserver(() => {
-    if (!location.pathname.startsWith('/article/') || queued || s.label?.isConnected) return;
+    if ((!location.pathname.startsWith('/article/') && !symbolTicker()) || queued) return;
     queued = true;
     setTimeout(() => { queued = false; init(); }, 250);
   }).observe(document.documentElement || document, { childList: true, subtree: true });
@@ -690,21 +726,20 @@ globalThis.__saahContentVersion = '2.0.5';
   // Keep watching throughout the article's initial client-side render. SA
   // sometimes paints the byline after the extension's first lifecycle event.
   setInterval(() => {
-    if (location.pathname.startsWith('/article/')) init();
+    init();
   }, 500);
   const retryVisibleArticle = () => {
-    if (!location.pathname.startsWith('/article/')) return;
     init();
     requestAnimationFrame(positionLabel);
   };
   addEventListener('pageshow', retryVisibleArticle);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) retryVisibleArticle(); });
-  let activeUrl = location.href;
   setInterval(() => {
     if (location.href !== activeUrl) {
       activeUrl = location.href;
       clearPreview();
     }
+    if (symbolTicker()) { init(); return; }
     if (!location.pathname.startsWith('/article/')) return;
     const currentAuthor = author();
     if (!currentAuthor) return;
