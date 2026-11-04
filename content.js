@@ -4,7 +4,7 @@ globalThis.__saahContentVersion = '2.1.2';
   const PAGE = 10, WINDOW = 365 * 86400;
   const color = { very_bullish: '#2f7d45', bullish: '#8acb8c', neutral: '#f8df63', bearish: '#ed7474', very_bearish: '#a63232' };
   const defaultPriceColor = '#75838a';
-  const s = { slug: '', page: 0, articles: [], articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), financialLoads: new Map() };
+  const s = { slug: '', page: 0, articles: [], cursor: 0, articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), financialLoads: new Map() };
 
   function author() {
     return [...document.querySelectorAll('a[href*="/author/"]')].find(a => {
@@ -251,10 +251,14 @@ globalThis.__saahContentVersion = '2.1.2';
       const sentiment = sentiments.get(String(article.id));
       const author = authorFor(article);
       const time = [article.attributes?.publishOn, article.attributes?.publishedAt, article.attributes?.createdAt, sentiment?.createdAt].map(timestamp).find(Number.isFinite);
-      return author && sentiment?.type && Number.isFinite(time) ? { ...author, type: sentiment.type, time } : null;
+      // Link the rating to the article that carried it; fall back to the id
+      // route when the feed omits a clean self link.
+      const self = article.links?.self || '';
+      const href = /^\/article\/\d+[\w-]*$/.test(self) ? self : '/article/' + encodeURIComponent(article.id);
+      return author && sentiment?.type && Number.isFinite(time) ? { ...author, type: sentiment.type, time, href } : null;
     }).filter(Boolean).sort((a, b) => b.time - a.time);
     if (!rows.length) { root.textContent = 'No SA analyst ratings were published in the past 2 months.'; return; }
-    root.innerHTML = '<h3 class="saah-section-title">Recent SA analyst ratings <span>Last 2 months</span></h3><section class="saah-author-ratings-card"><div class="saah-author-ratings-head"><span>Author</span><span>Rating</span><span>Date</span></div>' + rows.map(row => '<div class="saah-author-rating-row"><a href="/author/' + encodeURIComponent(row.slug) + '" title="View ' + escapeHtml(row.name) + '\'s author page">' + escapeHtml(row.name) + '</a><b class="saah-rating-' + sentimentClass(row.type) + '">' + escapeHtml(sentimentLabel(row.type)) + '</b><time>' + escapeHtml(new Date(row.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) + '</time></div>').join('') + '</section>';
+    root.innerHTML = '<h3 class="saah-section-title">Recent SA analyst ratings <span>Last 2 months</span></h3><section class="saah-author-ratings-card"><div class="saah-author-ratings-head"><span>Author</span><span>Rating</span><span>Date</span></div>' + rows.map(row => '<div class="saah-author-rating-row"><a href="/author/' + encodeURIComponent(row.slug) + '" title="View ' + escapeHtml(row.name) + '\'s author page">' + escapeHtml(row.name) + '</a><a class="saah-rating-badge saah-rating-' + sentimentClass(row.type) + '" href="' + row.href + '" target="_blank" rel="noopener" title="Read this ' + escapeHtml(sentimentLabel(row.type)) + ' article">' + escapeHtml(sentimentLabel(row.type)) + '</a><time>' + escapeHtml(new Date(row.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) + '</time></div>').join('') + '</section>';
   }
   function titleCaseAuthor(name) {
     return name.split(/(\s+)/).map(part => /^\s+$/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)).join('');
@@ -524,11 +528,25 @@ globalThis.__saahContentVersion = '2.1.2';
   async function more() {
     if (s.loading) return; s.loading = true; status('Loading ratings…');
     try {
-      await ensure(s.cards.length + PAGE);
-      const articles = s.articles.slice(s.cards.length, s.cards.length + PAGE);
-      await pool(articles, 4, async article => s.cards.push({ ticker: article.ticker, history: await history(article.ticker) }));
+      await ensure();
+      // Exchange checks run per page, so skipped tickers pull in the next
+      // candidates until a full page is shown or the list runs out. One
+      // failed chart must not block the rest of the page from rendering.
+      const target = s.cards.length + PAGE;
+      while (s.cards.length < target && s.cursor < s.articles.length) {
+        const batch = s.articles.slice(s.cursor, s.cursor + target - s.cards.length);
+        s.cursor += batch.length;
+        await pool(batch, 4, async article => {
+          if (!await usListed(article.ticker)) return;
+          const result = await history(article.ticker).catch(() => ({ ratings: [], price: [] }));
+          s.cards.push({ ticker: article.ticker, history: result });
+        });
+      }
       render(); status(s.cards.length + ' analyses');
-      s.panel.querySelector('.saah-more').hidden = s.done && s.cards.length >= s.articles.length;
+      // Disable rather than hide the button: hiding it shrinks the panel out
+      // from under the cursor, which fires mouseleave and closes the panel.
+      const button = s.panel.querySelector('.saah-more'), finished = s.cursor >= s.articles.length;
+      button.disabled = finished; button.textContent = finished ? 'All ratings loaded' : 'Load more';
     } catch (e) { status(e.message || 'Could not load ratings'); } finally { s.loading = false; }
   }
   async function ensure() {
@@ -557,14 +575,17 @@ globalThis.__saahContentVersion = '2.1.2';
   }
   async function preloadGraphs(count) {
     if (s.graphPreload) return s.graphPreload;
-    s.graphPreload = pool(s.articles.slice(0, count), 4, article => history(article.ticker).catch(() => null));
+    s.graphPreload = pool(s.articles.slice(0, count), 4, article => usListed(article.ticker).then(ok => ok && history(article.ticker)).catch(() => null));
     return s.graphPreload;
   }
   function articles(data) {
     const inc = data.included || [], byId = new Map(inc.map(x => [x.type + ':' + x.id, x]));
     const sentiment = new Map(inc.filter(x => x.type === 'sentiment').map(x => [String(x.attributes?.articleId), x.attributes]));
     return (data.data || []).map(a => {
-      const ref = a.relationships?.primaryTickers?.data?.[0], ticker = ref && byId.get(ref.type + ':' + ref.id)?.attributes?.slug;
+      // Prefer a U.S. stock/ETF listing when an article tags several (for
+      // example VHI:CA plus VHIBF); usListed() confirms the exchange later.
+      const ticker = (a.relationships?.primaryTickers?.data || []).map(ref => byId.get(ref.type + ':' + ref.id)?.attributes)
+        .find(tag => tag?.slug && !/:|-defunct-/i.test(tag.slug) && /^(stocks|etfs?)$/.test(tag.equityType || ''))?.slug;
       const rating = sentiment.get(String(a.id));
       const time = [a.attributes?.publishOn, a.attributes?.publishedAt, a.attributes?.createdAt, rating?.createdAt].map(timestamp).find(Number.isFinite);
       return ticker && rating && Number.isFinite(time) ? { ticker: ticker.toUpperCase(), time } : null;
@@ -600,6 +621,18 @@ globalThis.__saahContentVersion = '2.1.2';
     const response = await fetch(path, { credentials: 'include' });
     if (!response.ok) throw Error('Seeking Alpha returned ' + response.status);
     return response.json();
+  }
+  // The feed's ticker tags omit the exchange, so look it up per symbol and
+  // keep only active U.S. exchange-listed stocks and ETFs (no OTC, foreign
+  // or defunct/merged symbols).
+  const listingCache = new Map();
+  function usListed(ticker) {
+    const slug = ticker.toLowerCase();
+    if (!listingCache.has(slug)) listingCache.set(slug, get('/api/v3/symbols/' + encodeURIComponent(slug)).then(data => {
+      const a = data.data?.attributes || {};
+      return !a.isDefunct && !a.mergedOn && /^(stocks|etfs?)$/.test(a.equityType || '') && a.currency === 'USD' && /^(NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN|NYSEMKT|AMEX|BATS|CBOE)$/i.test(a.exchange || '');
+    }).catch(() => { listingCache.delete(slug); return false; }));
+    return listingCache.get(slug);
   }
   const priceCache = new Map();
   function price(symbol) {
@@ -708,7 +741,7 @@ globalThis.__saahContentVersion = '2.1.2';
     s.financialLabel?.remove();
     s.panel?.remove();
     s.financialPanel?.remove();
-    Object.assign(s, { slug: '', page: 0, articles: [], articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), financialLoads: new Map(), panel: null, financialPanel: null });
+    Object.assign(s, { slug: '', page: 0, articles: [], cursor: 0, articleLoad: null, graphPreload: null, cards: [], done: false, loading: false, histories: new Map(), historyLoads: new Map(), label: null, financialLabel: null, authorLink: null, articleTicker: null, financialCache: new Map(), financialLoads: new Map(), panel: null, financialPanel: null });
   }
   addEventListener('resize', () => { positionLabel(); if (s.panel?.classList.contains('is-open')) { place(s.label); render(); } if (s.financialPanel?.classList.contains('is-open')) placeFinancial(s.financialLabel, s.financialPanel); });
   addEventListener('scroll', positionLabel, true);
