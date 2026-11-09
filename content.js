@@ -468,9 +468,10 @@ globalThis.__saahContentVersion = '2.1.2';
       lastSection = row.section || lastSection;
       const cells = new Map((row.cells || []).map(cell => [cell.name, cell]));
       const rawValues = dates.map(date => Number(cells.get(date)?.raw_value)).filter(Number.isFinite);
-      const maximum = Math.max(1, ...rawValues.map(Math.abs));
-      const positiveMaximum = Math.max(1, ...rawValues.filter(value => value > 0));
-      const negativeMaximum = Math.max(1, ...rawValues.filter(value => value < 0).map(Math.abs));
+      // No floor of 1 here: per-share rows (EPS, revenue per share) live
+      // below 1 and would otherwise render as slivers.
+      const maximum = Math.max(0, ...rawValues.map(Math.abs)) || 1;
+      const negativeMaximum = Math.max(0, ...rawValues.filter(value => value < 0).map(Math.abs)) || 1;
       const mixedSigns = rawValues.some(value => value > 0) && rawValues.some(value => value < 0);
       const negativeOnly = !rawValues.some(value => value > 0) && rawValues.some(value => value < 0);
       const key = isKeyMetric(statement, label);
@@ -479,10 +480,14 @@ globalThis.__saahContentVersion = '2.1.2';
       const trend = dates.map(date => {
         const raw = Number(cells.get(date)?.raw_value);
         if (!Number.isFinite(raw) || raw === 0) return '<i class="saah-financial-trend-slot"></i>';
-        const height = mixedSigns ? Math.abs(raw) / maximum * 50 : negativeOnly ? Math.abs(raw) / negativeMaximum * 50 : Math.abs(raw) / maximum * 100;
+        // Mixed-sign rows share a center axis; single-sign rows use the full
+        // slot (negative-only bars hang from the top). A small floor keeps
+        // nonzero values visible next to a much larger outlier.
+        const span = mixedSigns ? 50 : 100;
+        const height = Math.max(8, Math.abs(raw) / (negativeOnly ? negativeMaximum : maximum) * span);
         return '<i class="saah-financial-trend-slot"><b class="' + (raw < 0 ? 'is-negative' : 'is-positive') + '" style="--bar-height:' + height.toFixed(1) + '%"></b></i>';
       }).join('');
-      tr.innerHTML = '<th>' + escapeHtml(label) + '</th><td class="saah-financial-trend' + (mixedSigns ? ' is-mixed' : '') + '"><span>' + trend + '</span></td>' + dates.map(date => '<td>' + escapeHtml(formatCell(cells.get(date)?.value ?? cells.get(date)?.raw_value)) + '</td>').join('');
+      tr.innerHTML = '<th>' + escapeHtml(label) + '</th><td class="saah-financial-trend' + (mixedSigns ? ' is-mixed' : negativeOnly ? ' is-negative-only' : '') + '"><span>' + trend + '</span></td>' + dates.map(date => '<td>' + escapeHtml(formatCell(cells.get(date)?.value ?? cells.get(date)?.raw_value)) + '</td>').join('');
       body.append(tr);
     });
     table.append(body); root.replaceChildren(table);
