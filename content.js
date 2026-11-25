@@ -27,7 +27,11 @@ globalThis.__saahContentVersion = '2.1.2';
     if (location.href !== activeUrl) { activeUrl = location.href; clearPreview(); }
     const ticker = symbolTicker();
     if (ticker) {
-      const heading = [...document.querySelectorAll('h1')].find(node => node.getBoundingClientRect().width > 0 && node.textContent.toUpperCase().includes(ticker));
+      // SA now renders the ticker <h1> with display: contents, which has no
+      // box of its own; anchor to its wrapper, which has the same box.
+      const heading = [...document.querySelectorAll('h1')].filter(node => node.textContent.toUpperCase().includes(ticker))
+        .map(node => getComputedStyle(node).display === 'contents' ? node.parentElement : node)
+        .find(node => node && node.getBoundingClientRect().width > 0);
       if (!heading) { positionLabel(); return; }
       if (s.authorLink !== heading) s.authorLink?.classList.remove('saah-symbol-heading');
       heading.classList.add('saah-symbol-heading');
